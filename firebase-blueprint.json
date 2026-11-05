@@ -1,0 +1,127 @@
+{
+  "entities": {
+    "AccountStatus": {
+      "title": "AccountStatus",
+      "description": "Public moderation status for pre-provisioned roster accounts managed by Admin.",
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string",
+          "enum": ["Carter", "Ryker", "Michael", "Admin"],
+          "maxLength": 16,
+          "minLength": 4,
+          "pattern": "^(Carter|Ryker|Michael|Admin)$",
+          "description": "Pre-provisioned roster account username."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["player", "admin"],
+          "maxLength": 10,
+          "minLength": 5,
+          "pattern": "^(player|admin)$",
+          "description": "Account access role."
+        },
+        "suspended": {
+          "type": "boolean",
+          "description": "Whether the account is suspended from submitting scores by Admin."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 160,
+          "minLength": 0,
+          "description": "Fair-play monitoring notes recorded by Admin."
+        },
+        "updatedBy": {
+          "type": "string",
+          "enum": ["Admin"],
+          "maxLength": 10,
+          "minLength": 5,
+          "pattern": "^Admin$",
+          "description": "Admin identifier that updated this status."
+        }
+      },
+      "required": ["username", "role", "suspended", "notes", "updatedBy"]
+    },
+    "LeaderboardScore": {
+      "title": "LeaderboardScore",
+      "description": "A recorded game run on the global leaderboard.",
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string",
+          "enum": ["Carter", "Ryker", "Michael", "Admin"],
+          "maxLength": 16,
+          "minLength": 4,
+          "pattern": "^(Carter|Ryker|Michael|Admin)$",
+          "description": "The roster player who achieved the score."
+        },
+        "score": {
+          "type": "integer",
+          "description": "Total final score (+10 per correct answer within 5s, -5 per wrong answer or timeout)."
+        },
+        "timeLimitSeconds": {
+          "type": "integer",
+          "enum": [30, 60, 120],
+          "description": "Game mode time limit in seconds (30s, 60s, or 120s)."
+        },
+        "correctCount": {
+          "type": "integer",
+          "description": "Total correct addition answers."
+        },
+        "wrongCount": {
+          "type": "integer",
+          "description": "Total wrong addition answers."
+        },
+        "timeoutCount": {
+          "type": "integer",
+          "description": "Total 5-second shot clock timeouts (-5 points each)."
+        },
+        "accuracy": {
+          "type": "integer",
+          "description": "Accuracy percentage (0 to 100)."
+        },
+        "bestStreak": {
+          "type": "integer",
+          "description": "Longest consecutive correct answer streak during the run."
+        },
+        "flagged": {
+          "type": "boolean",
+          "description": "Whether the run has been flagged for fair-play review by Admin."
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "Whether the run has been verified for fair play by Admin."
+        },
+        "playedAtIso": {
+          "type": "string",
+          "maxLength": 40,
+          "minLength": 10,
+          "description": "ISO-8601 timestamp string when the run was completed."
+        }
+      },
+      "required": [
+        "username",
+        "score",
+        "timeLimitSeconds",
+        "correctCount",
+        "wrongCount",
+        "timeoutCount",
+        "accuracy",
+        "bestStreak",
+        "flagged",
+        "verified",
+        "playedAtIso"
+      ]
+    }
+  },
+  "firestore": {
+    "/accountStatuses/{accountId}": {
+      "schema": "AccountStatus",
+      "description": "Roster account status documents keyed by username (Carter, Ryker, Michael, Admin)."
+    },
+    "/leaderboardScores/{scoreId}": {
+      "schema": "LeaderboardScore",
+      "description": "Global leaderboard scores across 30s, 60s, and 120s addition sprint modes."
+    }
+  }
+}

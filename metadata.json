@@ -1,0 +1,6 @@
+{
+  "name": "Plus10 Sprint — Rapid Addition Arcade & Global Leaderboard",
+  "description": "High-speed 1–10 addition sprint challenge with a 5-second shot clock, 30s/1m/2m time limits, global leaderboards, pre-provisioned roster accounts, and Admin CSV export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

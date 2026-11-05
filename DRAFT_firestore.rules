@@ -1,0 +1,126 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isRosterUsername(name) {
+      return name is string && name.size() >= 4 && name.size() <= 16 && (
+        name == 'Carter' || name == 'Ryker' || name == 'Michael' || name == 'Admin'
+      );
+    }
+
+    // Validation Blueprint: AccountStatus
+    function isValidAccountStatus(data) {
+      return data.keys().hasAll(['username', 'role', 'suspended', 'notes', 'updatedBy']) &&
+        data.keys().hasOnly(['username', 'role', 'suspended', 'notes', 'updatedBy']) &&
+        isRosterUsername(data.username) &&
+        data.role is string && data.role.size() >= 5 && data.role.size() <= 10 &&
+        (data.username == 'Admin' ? data.role == 'admin' : data.role == 'player') &&
+        data.suspended is bool &&
+        (data.username == 'Admin' ? data.suspended == false : true) &&
+        data.notes is string && data.notes.size() <= 160 &&
+        data.updatedBy is string && data.updatedBy.size() == 5 && data.updatedBy == 'Admin';
+    }
+
+    // Validation Blueprint: LeaderboardScore
+    function isValidLeaderboardScore(data) {
+      return data.keys().hasAll([
+          'username',
+          'score',
+          'timeLimitSeconds',
+          'correctCount',
+          'wrongCount',
+          'timeoutCount',
+          'accuracy',
+          'bestStreak',
+          'flagged',
+          'verified',
+          'playedAtIso'
+        ]) &&
+        data.keys().hasOnly([
+          'username',
+          'score',
+          'timeLimitSeconds',
+          'correctCount',
+          'wrongCount',
+          'timeoutCount',
+          'accuracy',
+          'bestStreak',
+          'flagged',
+          'verified',
+          'playedAtIso'
+        ]) &&
+        isRosterUsername(data.username) &&
+        data.timeLimitSeconds is int && (data.timeLimitSeconds == 30 || data.timeLimitSeconds == 60 || data.timeLimitSeconds == 120) &&
+        data.correctCount is int && data.correctCount >= 0 && data.correctCount <= 300 &&
+        data.wrongCount is int && data.wrongCount >= 0 && data.wrongCount <= 300 &&
+        data.timeoutCount is int && data.timeoutCount >= 0 && data.timeoutCount <= 300 &&
+        data.score is int && data.score >= -1500 && data.score <= 3000 &&
+        data.score == (data.correctCount * 10) - ((data.wrongCount + data.timeoutCount) * 5) &&
+        data.accuracy is int && data.accuracy >= 0 && data.accuracy <= 100 &&
+        data.bestStreak is int && data.bestStreak >= 0 && data.bestStreak <= 300 &&
+        data.flagged is bool &&
+        data.verified is bool &&
+        data.playedAtIso is string && data.playedAtIso.size() >= 10 && data.playedAtIso.size() <= 40;
+    }
+
+    // Connection test endpoint used by getDocFromServer(doc(db, 'test', 'connection'))
+    match /test/{docId} {
+      allow get: if isValidId(docId) && docId == 'connection';
+    }
+
+    // Roster Account Statuses (/accountStatuses/{accountId})
+    match /accountStatuses/{accountId} {
+      allow get: if isValidId(accountId) && isRosterUsername(accountId);
+      allow list: if existing().username in ['Carter', 'Ryker', 'Michael', 'Admin'];
+      allow create: if isValidId(accountId) &&
+        isValidAccountStatus(incoming()) &&
+        incoming().username == accountId;
+      allow update: if isValidId(accountId) &&
+        isValidAccountStatus(incoming()) &&
+        incoming().username == existing().username &&
+        incoming().role == existing().role &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['suspended', 'notes', 'updatedBy']);
+      allow delete: if false;
+    }
+
+    // Global Leaderboard Scores (/leaderboardScores/{scoreId})
+    match /leaderboardScores/{scoreId} {
+      allow get: if isValidId(scoreId) && isRosterUsername(existing().username);
+      allow list: if existing().username in ['Carter', 'Ryker', 'Michael', 'Admin'];
+      allow create: if isValidId(scoreId) &&
+        isValidLeaderboardScore(incoming()) &&
+        (!exists(/databases/$(database)/documents/accountStatuses/$(incoming().username)) ||
+         get(/databases/$(database)/documents/accountStatuses/$(incoming().username)).data.suspended == false);
+      allow update: if isValidId(scoreId) &&
+        isValidLeaderboardScore(incoming()) &&
+        incoming().username == existing().username &&
+        incoming().score == existing().score &&
+        incoming().timeLimitSeconds == existing().timeLimitSeconds &&
+        incoming().correctCount == existing().correctCount &&
+        incoming().wrongCount == existing().wrongCount &&
+        incoming().timeoutCount == existing().timeoutCount &&
+        incoming().accuracy == existing().accuracy &&
+        incoming().bestStreak == existing().bestStreak &&
+        incoming().playedAtIso == existing().playedAtIso &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['flagged', 'verified']);
+      allow delete: if isValidId(scoreId);
+    }
+  }
+}
