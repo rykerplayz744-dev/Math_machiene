@@ -49,6 +49,7 @@ import { soundFx } from './sound';
 type NavView = 'arena' | 'leaderboard' | 'roster' | 'admin';
 type GameState = 'TITLE_MENU' | 'PLAYING' | 'GAME_OVER';
 type InputControlMode = 'typing' | 'choices';
+type ShotClockSeconds = 5 | 10;
 
 const TIME_MODES: { seconds: TimeLimitMode; label: string; description: string }[] = [
   { seconds: 30, label: '30 Seconds', description: 'Rapid Blitz' },
@@ -56,7 +57,10 @@ const TIME_MODES: { seconds: TimeLimitMode; label: string; description: string }
   { seconds: 120, label: '2 Minutes', description: 'Endurance Run' },
 ];
 
-const SHOT_CLOCK_MS = 5000;
+const SHOT_CLOCK_OPTIONS: { seconds: ShotClockSeconds; label: string }[] = [
+  { seconds: 5, label: '5 Seconds' },
+  { seconds: 10, label: '10 Seconds' },
+];
 
 function generateRandomOneToTen(): number {
   return Math.floor(Math.random() * 10) + 1;
@@ -160,8 +164,19 @@ export default function App() {
   // Game State Machine
   const [gameState, setGameState] = useState<GameState>('TITLE_MENU');
   const [selectedTimeLimit, setSelectedTimeLimit] = useState<TimeLimitMode>(60);
+  const [shotClockSeconds, setShotClockSeconds] = useState<ShotClockSeconds>(() => {
+    try {
+      const saved = localStorage.getItem('plus10_shot_clock_sec');
+      if (saved === '10') return 10;
+      if (saved === '5') return 5;
+    } catch {
+      // ignore localStorage errors
+    }
+    return 5;
+  });
+  const shotClockMs = shotClockSeconds * 1000;
   const [remainingSessionMs, setRemainingSessionMs] = useState<number>(60 * 1000);
-  const [remainingShotMs, setRemainingShotMs] = useState<number>(SHOT_CLOCK_MS);
+  const [remainingShotMs, setRemainingShotMs] = useState<number>(() => shotClockSeconds * 1000);
 
   // Active Problem & Scoring State
   const [inputControlMode, setInputControlMode] = useState<InputControlMode>(() => {
@@ -305,8 +320,9 @@ export default function App() {
     }
   }, [loadingFirestore, currentUser]);
 
-  // Spawn next 1..10 + 1..10 problem and reset the 5-second shot clock
-  const spawnNextProblem = (nextIndex: number) => {
+  // Spawn next 1..10 + 1..10 problem and reset the active shot clock (5s or 10s)
+  const spawnNextProblem = (nextIndex: number, customShotMs?: number) => {
+    const durationMs = customShotMs ?? shotClockMs;
     const a = generateRandomOneToTen();
     const b = generateRandomOneToTen();
     const sum = a + b;
@@ -315,9 +331,22 @@ export default function App() {
     setChoiceOptions(generateThreeUniqueChoices(sum));
     setAnswerInput('');
     const now = performance.now();
-    shotDeadlineRef.current = now + SHOT_CLOCK_MS;
-    setRemainingShotMs(SHOT_CLOCK_MS);
+    shotDeadlineRef.current = now + durationMs;
+    setRemainingShotMs(durationMs);
     activeProblemRef.current = { a, b, index: nextIndex };
+  };
+
+  const handleSelectShotClock = (seconds: ShotClockSeconds) => {
+    setShotClockSeconds(seconds);
+    const nextMs = seconds * 1000;
+    if (gameState !== 'PLAYING') {
+      setRemainingShotMs(nextMs);
+    }
+    try {
+      localStorage.setItem('plus10_shot_clock_sec', String(seconds));
+    } catch {
+      // ignore localStorage errors
+    }
   };
 
   const handleSelectInputControlMode = (mode: InputControlMode) => {
@@ -455,7 +484,7 @@ export default function App() {
         return;
       }
 
-      // 5-second shot clock expired -> -5 points penalty & advance problem
+      // Shot clock expired -> -5 points penalty & advance problem
       if (shotLeft <= 0) {
         const prob = activeProblemRef.current;
         const nextScore = statsRef.current.score - 5;
@@ -469,7 +498,7 @@ export default function App() {
         setCurrentStreak(0);
         setLastFeedback({
           type: 'timeout',
-          text: `5s Expired! ${prob.a} + ${prob.b} = ${prob.a + prob.b} (-5 pts)`,
+          text: `${shotClockSeconds}s Expired! ${prob.a} + ${prob.b} = ${prob.a + prob.b} (-5 pts)`,
         });
         setProblemLog((prev) => [
           {
@@ -480,17 +509,17 @@ export default function App() {
             submitted: null,
             outcome: 'timeout',
             deltaPoints: -5,
-            elapsedMs: SHOT_CLOCK_MS,
+            elapsedMs: shotClockMs,
           },
           ...prev,
         ]);
         soundFx.playPenalty();
-        spawnNextProblem(prob.index + 1);
+        spawnNextProblem(prob.index + 1, shotClockMs);
       }
     }, 40);
 
     return () => window.clearInterval(intervalId);
-  }, [gameState, selectedTimeLimit, currentUser, accountStatuses]);
+  }, [gameState, selectedTimeLimit, shotClockSeconds, shotClockMs, currentUser, accountStatuses]);
 
   // Evaluate submitted answer
   const evaluateSubmission = (rawInput: string) => {
@@ -502,7 +531,7 @@ export default function App() {
 
     const prob = activeProblemRef.current;
     const expected = prob.a + prob.b;
-    const elapsedMs = Math.max(50, Math.round(SHOT_CLOCK_MS - Math.max(0, shotDeadlineRef.current - performance.now())));
+    const elapsedMs = Math.max(50, Math.round(shotClockMs - Math.max(0, shotDeadlineRef.current - performance.now())));
 
     if (numericAnswer === expected) {
       const nextScore = statsRef.current.score + 10;
@@ -830,7 +859,7 @@ export default function App() {
     return summary;
   }, [leaderboardScores]);
 
-  const shotClockRatio = Math.max(0, Math.min(1, remainingShotMs / SHOT_CLOCK_MS));
+  const shotClockRatio = Math.max(0, Math.min(1, remainingShotMs / shotClockMs));
   const sessionSecondsDisplay = (remainingSessionMs / 1000).toFixed(1);
   const shotSecondsDisplay = (remainingShotMs / 1000).toFixed(1);
 
@@ -920,7 +949,7 @@ export default function App() {
             <span className="text-slate-200 font-medium">Rules:</span>
             <span>Add two numbers (1 to 10)</span>
             <span aria-hidden="true">·</span>
-            <span>5.0s shot clock per equation</span>
+            <span>{shotClockSeconds}.0s shot clock per equation</span>
             <span aria-hidden="true">·</span>
             <span className="text-emerald-400 font-medium">+10 pts correct</span>
             <span aria-hidden="true">·</span>
@@ -978,8 +1007,8 @@ export default function App() {
                     </h1>
                     <p className="text-xs text-slate-400 mt-1">
                       {inputControlMode === 'choices'
-                        ? 'Click or tap the correct answer from 3 unique choices within 5 seconds.'
-                        : 'Type the sum before the 5-second shot clock expires.'}
+                        ? `Click or tap the correct answer from 3 unique choices within ${shotClockSeconds} seconds.`
+                        : `Type the sum before the ${shotClockSeconds}-second shot clock expires.`}
                     </p>
                   </div>
 
@@ -1006,34 +1035,61 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Input Method Toggle: Type Answer vs 3-Choice Touch / Mouse */}
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800/70">
-                  <div className="text-xs text-slate-300 font-medium">
-                    Answer Input Mode:
+                {/* Input Method & Shot Clock Limit Selectors */}
+                <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-slate-800/70">
+                  {/* Answer Input Mode Toggle */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-300 font-medium">
+                      Input Mode:
+                    </span>
+                    <div className="flex items-center gap-1 p-1 bg-[#0B1324] border border-slate-800 rounded-lg">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectInputControlMode('typing')}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                          inputControlMode === 'typing'
+                            ? 'bg-white text-slate-950'
+                            : 'text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        Type Answer
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectInputControlMode('choices')}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                          inputControlMode === 'choices'
+                            ? 'bg-emerald-400 text-slate-950'
+                            : 'text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        3-Option Click / Touch
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1 p-1 bg-[#0B1324] border border-slate-800 rounded-lg">
-                    <button
-                      type="button"
-                      onClick={() => handleSelectInputControlMode('typing')}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                        inputControlMode === 'typing'
-                          ? 'bg-white text-slate-950'
-                          : 'text-slate-300 hover:text-white'
-                      }`}
-                    >
-                      Type Answer (Keyboard)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectInputControlMode('choices')}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                        inputControlMode === 'choices'
-                          ? 'bg-emerald-400 text-slate-950'
-                          : 'text-slate-300 hover:text-white'
-                      }`}
-                    >
-                      3-Option Click / Touch
-                    </button>
+
+                  {/* Shot Clock Duration Toggle (5 Seconds vs 10 Seconds) */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-300 font-medium">
+                      Time Per Equation:
+                    </span>
+                    <div className="flex items-center gap-1 p-1 bg-[#0B1324] border border-slate-800 rounded-lg">
+                      {SHOT_CLOCK_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.seconds}
+                          type="button"
+                          disabled={gameState === 'PLAYING'}
+                          onClick={() => handleSelectShotClock(opt.seconds)}
+                          className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                            shotClockSeconds === opt.seconds
+                              ? 'bg-amber-400 text-slate-950'
+                              : 'text-slate-300 hover:text-white disabled:opacity-50'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1053,7 +1109,7 @@ export default function App() {
                     <div className="p-4 rounded-lg bg-[#0B1324] border border-slate-800/90">
                       <div className="text-xs text-slate-400">Shot Clock Limit</div>
                       <div className="font-mono-num text-xl font-bold text-amber-400 mt-1">
-                        5.0 Seconds
+                        {shotClockSeconds}.0 Seconds
                       </div>
                       <div className="text-xs text-slate-400 mt-1">Auto-advances on timeout</div>
                     </div>
@@ -1129,7 +1185,7 @@ export default function App() {
                     </div>
 
                     <div className="p-3.5 rounded-lg bg-[#0B1324] border border-slate-800">
-                      <div className="text-xs text-slate-400">5s Shot Clock</div>
+                      <div className="text-xs text-slate-400">{shotClockSeconds}s Shot Clock</div>
                       <div
                         className={`font-mono-num text-2xl font-bold mt-0.5 ${
                           remainingShotMs <= 1800 ? 'text-rose-400' : 'text-amber-400'
@@ -1158,11 +1214,11 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 5-Second Shot Clock Visual Progress Bar (compositor scaleX) */}
+                  {/* Shot Clock Visual Progress Bar (compositor scaleX) */}
                   <div className="mb-6">
                     <div className="flex items-center justify-between text-xs mb-1.5">
                       <span className="text-slate-300 font-medium">
-                        5-Second Equation Shot Clock
+                        {shotClockSeconds}-Second Equation Shot Clock
                       </span>
                       <span className="font-mono-num text-slate-300">
                         {shotSecondsDisplay}s remaining
@@ -1360,7 +1416,7 @@ export default function App() {
                         </div>
                       </div>
                       <div>
-                        <div className="text-xs text-slate-400">5s Timeouts (-5)</div>
+                        <div className="text-xs text-slate-400">{shotClockSeconds}s Timeouts (-5)</div>
                         <div className="font-mono-num text-xl font-bold text-amber-400 mt-0.5">
                           {timeoutCount}
                         </div>
